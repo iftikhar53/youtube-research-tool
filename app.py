@@ -11,7 +11,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 
-def build_youtube(api_key: str):
+def build_youtube(api_key: AIzaSyDg6RszNQ01SVAj5bLDi39sIcb4f8nDGoA):
     return build("youtube", "v3", developerKey=api_key, cache_discovery=False)
 
 
