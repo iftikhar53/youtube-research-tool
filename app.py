@@ -1,95 +1,112 @@
 import streamlit as st
-st.warning("Channel not found. Please provide a valid channel URL/ID/handle.")
-return pd.DataFrame()
-# Get uploads playlist
-ch = youtube.channels().list(part="contentDetails,snippet,statistics", id=ch_id).execute()
-items = ch.get("items", [])
-if not items:
-st.warning("Channel not found.")
-return pd.DataFrame()
-uploads = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+import pandas as pd
+from googleapiclient.discovery import build
+
+# ===============================
+# YouTube API Helper Functions
+# ===============================
+def youtube_search(api_key, query, max_results=20):
+    youtube = build("youtube", "v3", developerKey=api_key)
+    request = youtube.search().list(
+        q=query,
+        part="snippet",
+        type="video",
+        maxResults=max_results
+    )
+    response = request.execute()
+
+    videos = []
+    for item in response.get("items", []):
+        videos.append({
+            "Video Title": item["snippet"]["title"],
+            "Channel": item["snippet"]["channelTitle"],
+            "Published At": item["snippet"]["publishedAt"],
+            "Video ID": item["id"]["videoId"],
+            "Video URL": f"https://www.youtube.com/watch?v={item['id']['videoId']}"
+        })
+    return pd.DataFrame(videos)
 
 
-# Collect videos from uploads playlist
-vids: List[str] = []
-page_token = None
-while len(vids) < max_results:
-pl = youtube.playlistItems().list(part="contentDetails", playlistId=uploads, maxResults=min(50, max_results - len(vids)), pageToken=page_token).execute()
-for it in pl.get("items", []):
-vid = it.get("contentDetails", {}).get("videoId")
-if vid:
-vids.append(vid)
-page_token = pl.get("nextPageToken")
-if not page_token:
-break
+def youtube_trending(api_key, region="US", max_results=20):
+    youtube = build("youtube", "v3", developerKey=api_key)
+    request = youtube.videos().list(
+        part="snippet,statistics",
+        chart="mostPopular",
+        regionCode=region,
+        maxResults=max_results
+    )
+    response = request.execute()
+
+    videos = []
+    for item in response.get("items", []):
+        videos.append({
+            "Video Title": item["snippet"]["title"],
+            "Channel": item["snippet"]["channelTitle"],
+            "Published At": item["snippet"]["publishedAt"],
+            "Views": item["statistics"].get("viewCount", "N/A"),
+            "Likes": item["statistics"].get("likeCount", "N/A"),
+            "Video URL": f"https://www.youtube.com/watch?v={item['id']}"
+        })
+    return pd.DataFrame(videos)
 
 
-details = fetch_video_details(youtube, vids)
-return df_from_details(details)
+def youtube_competitor(api_key, channel_id, max_results=20):
+    youtube = build("youtube", "v3", developerKey=api_key)
+    request = youtube.search().list(
+        channelId=channel_id,
+        part="snippet",
+        order="date",
+        type="video",
+        maxResults=max_results
+    )
+    response = request.execute()
+
+    videos = []
+    for item in response.get("items", []):
+        videos.append({
+            "Video Title": item["snippet"]["title"],
+            "Published At": item["snippet"]["publishedAt"],
+            "Video ID": item["id"]["videoId"],
+            "Video URL": f"https://www.youtube.com/watch?v={item['id']['videoId']}"
+        })
+    return pd.DataFrame(videos)
 
 
+# ===============================
+# Streamlit UI
+# ===============================
+st.set_page_config(page_title="YouTube Research Tool", layout="wide")
+st.title("📊 YouTube Automation Research Tool")
 
+# API Key input
+api_key = st.text_input("🔑 Enter your YouTube API Key:", type="password")
 
-# ---------- UI ----------
-st.title("📊 YouTube Content Research Tool")
-st.caption("Keyword research • Trending by region/category • Competitor analysis • CSV export")
+# Mode selection
+mode = st.selectbox("Select Mode:", ["Keyword Research", "Trending", "Competitor Analysis"])
 
+if api_key:
+    if mode == "Keyword Research":
+        query = st.text_input("Enter a search keyword:")
+        if st.button("Search"):
+            df = youtube_search(api_key, query)
+            st.dataframe(df)
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Download CSV", csv, "keyword_research.csv", "text/csv")
 
-with st.sidebar:
-st.header("Settings")
-api_key = st.text_input("YouTube API Key", type="password")
-mode = st.radio("Mode", ["Keyword Research", "Trending (Region/Category)", "Competitor Analysis"], index=0)
+    elif mode == "Trending":
+        region = st.text_input("Enter region code (default US):", value="US")
+        if st.button("Get Trending"):
+            df = youtube_trending(api_key, region)
+            st.dataframe(df)
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Download CSV", csv, "trending_videos.csv", "text/csv")
 
-
-if not api_key:
-st.info("Enter your YouTube API key in the sidebar to begin.")
-st.stop()
-
-
-try:
-yt = build_youtube(api_key)
-except Exception as e:
-st.error(f"Failed to initialize YouTube API: {e}")
-st.stop()
-
-
-try:
-if mode == "Keyword Research":
-col1, col2, col3 = st.columns([3,1,1])
-with col1:
-q = st.text_input("Keyword / search query", "toyota supra")
-with col2:
-max_r = st.slider("Max results", 5, 100, 25, step=5)
-with col3:
-order = st.selectbox("Order", ["viewCount", "relevance", "date", "rating", "title", "videoCount"], index=0)
-
-
-if st.button("Search", type="primary"):
-df = search_videos(yt, q, max_r, order)
-if df.empty:
-st.warning("No results.")
+    elif mode == "Competitor Analysis":
+        channel_id = st.text_input("Enter Competitor Channel ID:")
+        if st.button("Analyze"):
+            df = youtube_competitor(api_key, channel_id)
+            st.dataframe(df)
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Download CSV", csv, "competitor_analysis.csv", "text/csv")
 else:
-st.success(f"Found {len(df)} videos")
-st.dataframe(df, use_container_width=True, hide_index=True)
-st.download_button("Download CSV", df.to_csv(index=False).encode("utf-8-sig"), file_name="keyword_results.csv", mime="text/csv")
-
-
-elif mode == "Trending (Region/Category)":
-col1, col2, col3 = st.columns([1,1,1])
-with col1:
-region = st.text_input("Region code (e.g., PK, IN, US, GB)", "PK")
-with col2:
-category_name = st.selectbox("Category", list(CATEGORY_MAP.keys()), index=0)
-category_id = CATEGORY_MAP[category_name]
-with col3:
-max_r = st.slider("Max results", 10, 100, 50, step=10)
-
-
-if st.button("Fetch Trending", type="primary"):
-df = trending_videos(yt, region, category_id, max_r)
-if df.empty:
-st.warning("No results.")
-else:
-st.success(f"Fetched {len(df)} trending videos")
-st.dataframe(df, use_container_width=True, hide_index=True)
-st.download_button("Download CSV", df.to_csv(index=False).encode("utf-8-sig"), file_name="trending_results.csv", mime="text/csv")
+    st.warning("⚠️ Please enter your API key to continue.")
