@@ -1,21 +1,12 @@
 import streamlit as st
-import pandas as pd
 from googleapiclient.discovery import build
 
-# Streamlit App Title
-st.set_page_config(page_title="YouTube Research Tool", layout="wide")
-st.title("📊 YouTube Research Tool")
-
-# Sidebar for API Key and Mode Selection
-st.sidebar.header("Configuration")
-api_key = st.sidebar.text_input("🔑 Enter YouTube API Key", type="password")
-mode = st.sidebar.selectbox("Select Mode", ["Search", "Trending", "Competitor Analysis"])
-
-# Helper function to connect with YouTube API
+# --- YouTube API Call Helper ---
 def get_youtube(api_key):
     return build("youtube", "v3", developerKey=api_key)
 
-# Search Function
+
+# --- Search Function ---
 def search_videos(youtube, query, max_results=10):
     request = youtube.search().list(
         q=query,
@@ -24,55 +15,90 @@ def search_videos(youtube, query, max_results=10):
         maxResults=max_results
     )
     response = request.execute()
-    results = []
-    for item in response.get("items", []):
-        results.append({
-            "Title": item["snippet"]["title"],
-            "Channel": item["snippet"]["channelTitle"],
-            "Published At": item["snippet"]["publishedAt"],
-            "Video ID": item["id"]["videoId"],
-            "Video Link": f"https://www.youtube.com/watch?v={item['id']['videoId']}"
-        })
-    return pd.DataFrame(results)
+    return response.get("items", [])
 
-# Competitor Function
-def competitor_analysis(youtube, channel_id, max_results=10):
-    request = youtube.search().list(
-        channelId=channel_id,
-        part="snippet",
-        order="date",
-        type="video",
+
+# --- Competitor Channel Analysis ---
+def get_channel_stats(youtube, channel_id):
+    request = youtube.channels().list(
+        part="snippet,statistics",
+        id=channel_id
+    )
+    response = request.execute()
+    return response.get("items", [])
+
+
+# --- Trending Videos ---
+def get_trending_videos(youtube, region="US", max_results=10):
+    request = youtube.videos().list(
+        part="snippet,statistics",
+        chart="mostPopular",
+        regionCode=region,
         maxResults=max_results
     )
     response = request.execute()
-    results = []
-    for item in response.get("items", []):
-        results.append({
-            "Title": item["snippet"]["title"],
-            "Published At": item["snippet"]["publishedAt"],
-            "Video ID": item["id"]["videoId"],
-            "Video Link": f"https://www.youtube.com/watch?v={item['id']['videoId']}"
-        })
-    return pd.DataFrame(results)
+    return response.get("items", [])
 
-# Main App Logic
-if api_key:
+
+# --- Streamlit App ---
+def main():
+    st.title("📊 YouTube Research Tool")
+
+    st.sidebar.header("⚙️ Settings")
+    api_key = st.sidebar.text_input("Enter YouTube API Key", type="password")
+
+    if not api_key:
+        st.warning("⚠️ Pehle apna YouTube API Key enter karo")
+        return
+
     youtube = get_youtube(api_key)
 
+    mode = st.sidebar.radio("Select Mode", ["Search", "Trending", "Competitor Analysis"])
+
     if mode == "Search":
-        query = st.text_input("🔍 Enter a search query")
-        if st.button("Search") and query:
-            df = search_videos(youtube, query)
-            st.dataframe(df, use_container_width=True)
+        st.subheader("🔍 YouTube Video Search")
+        query = st.text_input("Search Term")
+        if st.button("Search"):
+            results = search_videos(youtube, query)
+            for video in results:
+                title = video["snippet"]["title"]
+                channel = video["snippet"]["channelTitle"]
+                video_id = video["id"]["videoId"]
+                url = f"https://youtube.com/watch?v={video_id}"
+                st.write(f"**{title}** by *{channel}*")
+                st.video(url)
 
     elif mode == "Trending":
-        st.info("⚡ Trending videos feature will be added soon (region-based).")
+        st.subheader("🔥 Trending Videos")
+        region = st.text_input("Enter Region Code (default = US)", value="US")
+        if st.button("Get Trending"):
+            results = get_trending_videos(youtube, region)
+            for video in results:
+                title = video["snippet"]["title"]
+                channel = video["snippet"]["channelTitle"]
+                video_id = video["id"]
+                url = f"https://youtube.com/watch?v={video_id}"
+                st.write(f"**{title}** by *{channel}*")
+                st.video(url)
 
     elif mode == "Competitor Analysis":
-        channel_id = st.text_input("🏆 Enter Competitor Channel ID")
-        if st.button("Analyze") and channel_id:
-            df = competitor_analysis(youtube, channel_id)
-            st.dataframe(df, use_container_width=True)
+        st.subheader("🏆 Competitor Channel Analysis")
+        channel_id = st.text_input("Enter Channel ID")
+        if st.button("Analyze"):
+            results = get_channel_stats(youtube, channel_id)
+            if results:
+                data = results[0]
+                title = data["snippet"]["title"]
+                subs = data["statistics"].get("subscriberCount", "N/A")
+                views = data["statistics"].get("viewCount", "N/A")
+                videos = data["statistics"].get("videoCount", "N/A")
+                st.write(f"📺 **{title}**")
+                st.write(f"👥 Subscribers: {subs}")
+                st.write(f"👀 Views: {views}")
+                st.write(f"🎬 Total Videos: {videos}")
+            else:
+                st.error("Channel not found!")
 
-else:
-    st.warning("Please enter your YouTube API key in the sidebar to continue.")
+
+if __name__ == "__main__":
+    main()
