@@ -2,111 +2,73 @@ import streamlit as st
 import pandas as pd
 from googleapiclient.discovery import build
 
-# ===============================
-# YouTube API Helper Functions
-# ===============================
-def youtube_search(api_key, query, max_results=20):
-    youtube = build("youtube", "v3", developerKey=api_key)
-    request = youtube.search().list(
-        q=query,
-        part="snippet",
-        type="video",
-        maxResults=max_results
-    )
-    response = request.execute()
-
-    videos = []
-    for item in response.get("items", []):
-        videos.append({
-            "Video Title": item["snippet"]["title"],
-            "Channel": item["snippet"]["channelTitle"],
-            "Published At": item["snippet"]["publishedAt"],
-            "Video ID": item["id"]["videoId"],
-            "Video URL": f"https://www.youtube.com/watch?v={item['id']['videoId']}"
-        })
-    return pd.DataFrame(videos)
-
-
-def youtube_trending(api_key, region="US", max_results=20):
-    youtube = build("youtube", "v3", developerKey=api_key)
-    request = youtube.videos().list(
-        part="snippet,statistics",
-        chart="mostPopular",
-        regionCode=region,
-        maxResults=max_results
-    )
-    response = request.execute()
-
-    videos = []
-    for item in response.get("items", []):
-        videos.append({
-            "Video Title": item["snippet"]["title"],
-            "Channel": item["snippet"]["channelTitle"],
-            "Published At": item["snippet"]["publishedAt"],
-            "Views": item["statistics"].get("viewCount", "N/A"),
-            "Likes": item["statistics"].get("likeCount", "N/A"),
-            "Video URL": f"https://www.youtube.com/watch?v={item['id']}"
-        })
-    return pd.DataFrame(videos)
-
-
-def youtube_competitor(api_key, channel_id, max_results=20):
-    youtube = build("youtube", "v3", developerKey=api_key)
-    request = youtube.search().list(
-        channelId=channel_id,
-        part="snippet",
-        order="date",
-        type="video",
-        maxResults=max_results
-    )
-    response = request.execute()
-
-    videos = []
-    for item in response.get("items", []):
-        videos.append({
-            "Video Title": item["snippet"]["title"],
-            "Published At": item["snippet"]["publishedAt"],
-            "Video ID": item["id"]["videoId"],
-            "Video URL": f"https://www.youtube.com/watch?v={item['id']['videoId']}"
-        })
-    return pd.DataFrame(videos)
-
-
-# ===============================
-# Streamlit UI
-# ===============================
+# Streamlit app
 st.set_page_config(page_title="YouTube Research Tool", layout="wide")
-st.title("📊 YouTube Automation Research Tool")
 
-# API Key input
-api_key = st.text_input("🔑 Enter your YouTube API Key:", type="password")
+st.title("📊 YouTube Research Tool")
 
-# Mode selection
-mode = st.selectbox("Select Mode:", ["Keyword Research", "Trending", "Competitor Analysis"])
+# Sidebar inputs
+api_key = st.sidebar.text_input("🔑 Enter YouTube API Key", type="password")
+mode = st.sidebar.selectbox("Select Mode", ["search", "trending", "competitor"])
 
-if api_key:
-    if mode == "Keyword Research":
-        query = st.text_input("Enter a search keyword:")
-        if st.button("Search"):
-            df = youtube_search(api_key, query)
+query = None
+channel_id = None
+if mode == "search":
+    query = st.sidebar.text_input("Enter Search Keyword")
+elif mode == "competitor":
+    channel_id = st.sidebar.text_input("Enter Competitor Channel ID")
+
+# Function to connect YouTube API
+def get_youtube_service(api_key):
+    return build("youtube", "v3", developerKey=api_key)
+
+# Run logic
+if st.sidebar.button("Run Tool"):
+    if not api_key:
+        st.error("Please enter your YouTube API Key")
+    else:
+        youtube = get_youtube_service(api_key)
+
+        if mode == "search" and query:
+            request = youtube.search().list(
+                q=query,
+                part="snippet",
+                type="video",
+                maxResults=10
+            )
+            response = request.execute()
+            results = []
+            for item in response["items"]:
+                results.append({
+                    "Title": item["snippet"]["title"],
+                    "Channel": item["snippet"]["channelTitle"],
+                    "Published": item["snippet"]["publishedAt"],
+                    "Video ID": item["id"]["videoId"]
+                })
+            df = pd.DataFrame(results)
             st.dataframe(df)
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download CSV", csv, "keyword_research.csv", "text/csv")
 
-    elif mode == "Trending":
-        region = st.text_input("Enter region code (default US):", value="US")
-        if st.button("Get Trending"):
-            df = youtube_trending(api_key, region)
+        elif mode == "competitor" and channel_id:
+            request = youtube.search().list(
+                channelId=channel_id,
+                part="snippet",
+                type="video",
+                order="date",
+                maxResults=10
+            )
+            response = request.execute()
+            results = []
+            for item in response["items"]:
+                results.append({
+                    "Title": item["snippet"]["title"],
+                    "Published": item["snippet"]["publishedAt"],
+                    "Video ID": item["id"]["videoId"]
+                })
+            df = pd.DataFrame(results)
             st.dataframe(df)
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download CSV", csv, "trending_videos.csv", "text/csv")
 
-    elif mode == "Competitor Analysis":
-        channel_id = st.text_input("Enter Competitor Channel ID:")
-        if st.button("Analyze"):
-            df = youtube_competitor(api_key, channel_id)
-            st.dataframe(df)
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download CSV", csv, "competitor_analysis.csv", "text/csv")
-else:
-    st.warning("⚠️ Please enter your API key to continue.")
+        elif mode == "trending":
+            st.info("⚡ Trending API ka direct access nahi hai free YouTube API me. Iske liye custom logic banana padega.")
+
+        else:
+            st.warning("Please provide required inputs.")
