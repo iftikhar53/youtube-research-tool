@@ -66,7 +66,7 @@ if api_key:
             st.dataframe(df, use_container_width=True)
 
     elif mode == "Trending":
-        st.write("⚡ Trending videos feature will be added soon (region-based).")
+        st.info("⚡ Trending videos feature will be added soon (region-based).")
 
     elif mode == "Competitor Analysis":
         channel_id = st.text_input("🏆 Enter Competitor Channel ID")
